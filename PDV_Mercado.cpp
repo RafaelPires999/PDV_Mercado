@@ -19,6 +19,7 @@ FILE* arq_fornecedor;
 FILE* arq_usuario;
 FILE* arq_vendas;
 FILE* arq_fechamentos;
+FILE* arq_hist_cliente;
 
 bool turnoAberto = false;
 double valorInicialTurno = 0.0;
@@ -83,6 +84,14 @@ struct FechamentoCaixa {
 	double total_vendas;
 };
 
+struct HistoricoCliente {
+	int id_cliente;
+	DataHora data;
+	char tipo[20];
+	char descricao[50];
+	double valor;
+};
+
 struct ItemCarrinho {
 	Produtos produto;
 	int quantidade;
@@ -129,6 +138,7 @@ void Cadastrar_Clientes();
 bool Buscar_Cliente(const char* busca, Clientes& clienteEncontrado);
 void Listar_Buscar_Clientes();
 void Atualizar_Cliente();
+void Historico_Compras_Cliente();
 void Registrar_Pagamento();
 void excluir_Cliente();
 
@@ -1128,7 +1138,7 @@ void MenuGerenciamento_Clientes() {
 			Atualizar_Cliente();
 			break;
 		case 4:
-			// Historico de Compras
+			Historico_Compras_Cliente();
 			break;
 		case 5:
 			Registrar_Pagamento();
@@ -1489,6 +1499,76 @@ void Atualizar_Cliente() {
 	} while (toupper(confirmar) == 'S');
 }
 
+// Histórico de Compras do Cliente
+void Historico_Compras_Cliente() {
+	char busca[40];
+	Clientes clienteEncontrado;
+	HistoricoCliente item_leitura;
+
+	system("cls");
+	cout << "================= HISTÓRICO DO CLIENTE =================\n\n";
+	cout << "Digite o CPF ou Nome do Cliente: ";
+	cin.ignore();
+	cin.getline(busca, sizeof(busca));
+	_strupr(busca);
+
+	if (Buscar_Cliente(busca, clienteEncontrado)) {
+
+		system("cls");
+		cout << "Cliente: " << clienteEncontrado.nome << " (ID: " << clienteEncontrado.id_cliente << ")\n";
+		cout << "Telefone: " << clienteEncontrado.telefone << "\n\n";
+		cout << "SALDO DEVEDOR ATUAL: R$ " << fixed << setprecision(2) << clienteEncontrado.saldo_devedor << "\n";
+		cout << "=================================================================================\n\n";
+
+		cout << left
+			<< setw(22) << "DATA/HORA"
+			<< setw(18) << "TIPO"
+			<< setw(25) << "DESCRIÇÃO"
+			<< "VALOR (R$)";
+		cout << "\n=================================================================================\n";
+
+		arq_hist_cliente = fopen("HistCliente.dat", "rb");
+
+		if (arq_hist_cliente == NULL) {
+			cout << "\nNenhum histórico de transações fiado/pagamento encontrado.\n";
+		}
+		else {
+			bool encontrouRegistros = false;
+
+			while (fread(&item_leitura, sizeof(HistoricoCliente), 1, arq_hist_cliente) == 1) {
+				if (item_leitura.id_cliente == clienteEncontrado.id_cliente) {
+					encontrouRegistros = true;
+
+					cout << left << setfill('0')
+						<< setw(2) << item_leitura.data.dia << "/"
+						<< setw(2) << item_leitura.data.mes << "/"
+						<< setw(4) << item_leitura.data.ano << " "
+						<< setw(2) << item_leitura.data.hora << ":"
+						<< setw(2) << item_leitura.data.minuto
+						<< setfill(' ');
+
+					cout << "      "
+						<< setw(18) << item_leitura.tipo
+						<< setw(25) << item_leitura.descricao;
+					cout << fixed << setprecision(2) << item_leitura.valor;
+					cout << "\n---------------------------------------------------------------------------------\n";
+				}
+			}
+			fclose(arq_hist_cliente);
+
+			if (!encontrouRegistros) {
+				cout << "\nNenhum histórico de transações fiado/pagamento encontrado para este cliente.\n";
+			}
+		}
+		cout << "\n=================================================================================\n";
+		cout << "Saldo Final: R$ " << fixed << setprecision(2) << clienteEncontrado.saldo_devedor << "\n\n";
+	}
+	else {
+		cout << "\nCliente não encontrado.\n\n";
+	}
+	system("pause");
+}
+
 // Registrar Pagamento
 void Registrar_Pagamento() {
 	char busca[40], confirmar;
@@ -1559,6 +1639,24 @@ void Registrar_Pagamento() {
 				fseek(arq_clientes, pos, SEEK_SET);
 				fwrite(&clienteEditar, sizeof(Clientes), 1, arq_clientes);
 				fclose(arq_clientes);
+
+				HistoricoCliente hist;
+				hist.id_cliente = clienteEncontrado.id_cliente;
+				hist.data = ObterDataHoraAtual();
+				strcpy(hist.tipo, "PAGAMENTO");
+				strcpy(hist.descricao, "Pagamento de Divida");
+				hist.valor = -pagamento; // Valor negativo, pois é um pagamento
+
+				arq_hist_cliente = fopen("HistCliente.dat", "ab");
+				// *** CORREÇÃO APLICADA AQUI ***
+				if (arq_hist_cliente != NULL) { // Correto: != NULL
+					fwrite(&hist, sizeof(HistoricoCliente), 1, arq_hist_cliente);
+					fclose(arq_hist_cliente);
+				}
+				else {
+					cout << "\nERRO: Nao foi possivel salvar no historico do cliente.\n";
+				}
+
 
 				cout << "\nPagamento Realizado Com Sucesso\n\n";
 			}
@@ -1657,7 +1755,7 @@ void excluir_Cliente() {
 		cout << "Deseja excluir Outro Cliente ? (S/N): ";
 		cin >> confirmar;
 
-		ConfirmarSim_Nao(confirmar); // Corrigido: Faltava (confirmar)
+		ConfirmarSim_Nao(confirmar); // *** CORRIGIDO: Faltava (confirmar) ***
 	} while (toupper(confirmar) == 'S');
 }
 
@@ -2709,6 +2807,8 @@ void Iniciar_Venda() {
 			int formaPagamento;
 			bool pagamentoOK = false;
 
+			int idDaVendaAtual = Proximo_ID_Venda();
+
 			cout << "Forma de Pagamento:\n";
 			cout << "1 - Dinheiro\n";
 			cout << "2 - Cartão de Crédito/Débito\n";
@@ -2786,6 +2886,24 @@ void Iniciar_Venda() {
 
 						cout << "\nSaldo do cliente atualizado com sucesso.\n";
 						pagamentoOK = true;
+
+						HistoricoCliente hist;
+						hist.id_cliente = clienteEncontrado.id_cliente;
+						hist.data = ObterDataHoraAtual();
+						strcpy(hist.tipo, "COMPRA FIADO");
+						hist.valor = total; // Valor positivo, aumenta a dívida
+
+						sprintf(hist.descricao, "Venda ID %d", idDaVendaAtual);
+
+						arq_hist_cliente = fopen("HistCliente.dat", "ab");
+						// *** CORREÇÃO APLICADA AQUI ***
+						if (arq_hist_cliente != NULL) { // Correto: != NULL
+							fwrite(&hist, sizeof(HistoricoCliente), 1, arq_hist_cliente);
+							fclose(arq_hist_cliente);
+						}
+						else {
+							cout << "\nERRO: Nao foi possivel salvar no historico do cliente.\n";
+						}
 					}
 					else {
 						cout << "\nVenda Fiado Cancelada.\n";
@@ -2822,8 +2940,6 @@ void Iniciar_Venda() {
 					vendasTurno_Fiado += total;
 					break;
 				}
-
-				int idDaVendaAtual = Proximo_ID_Venda();
 
 				arq_vendas = fopen("Vendas.dat", "ab");
 				if (arq_vendas == NULL) {
